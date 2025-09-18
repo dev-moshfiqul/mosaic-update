@@ -1,0 +1,34 @@
+{
+  "name": "mystery-mosaic-app",
+  "version": "1.0.0",
+  "description": "Mystery Mosaic Color-By-Number App with Authentication and Subscription",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start-simple": "node server-simple.js",
+    "dev": "nodemon server.js",
+    "dev-simple": "nodemon server-simple.js",
+    "setup": "node setup.js",
+    "setup-db": "mysql -u root -p < database.sql"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.6.0",
+    "bcrypt": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "mosaic",
+    "color-by-number",
+    "authentication",
+    "subscription",
+    "react"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

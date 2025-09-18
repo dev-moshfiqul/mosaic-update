@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mystery Mosaic - Subscription Plans</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        .plan-card {
+            transition: all 0.3s ease;
+        }
+        .plan-card:hover {
+            transform: translateY(-5px);
+        }
+        .popular-badge {
+            background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function SubscriptionApp() {
+            const [selectedPlan, setSelectedPlan] = useState('yearly');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [showCreditPackages, setShowCreditPackages] = useState(false);
+            const [creditPackages, setCreditPackages] = useState([]);
+            const [userCredits, setUserCredits] = useState({ remaining: 0, subscribed: false });
+
+            const plans = {
+                monthly: {
+                    name: 'Monthly Plan',
+                    price: 60,
+                    period: 'month',
+                    credits: 400,
+                    description: 'Great for active creators each month',
+                    features: [
+                        '400 credits included per month',
+                        'All shape types',
+                        'High-quality exports',
+                        'Priority support'
+                    ]
+                },
+                yearly: {
+                    name: 'Yearly Plan',
+                    price: 576,
+                    period: 'year',
+                    credits: 5000,
+                    description: 'Best value for power users',
+                    features: [
+                        '5000 credits included per year',
+                        'All shape types',
+                        'High-quality exports',
+                        'Priority support',
+                        'Early access to new features'
+                    ],
+                    popular: true
+                }
+            };
+
+            const handleSubscribe = async () => {
+                setLoading(true);
+                setError('');
+
+                try {
+                    const user = JSON.parse(localStorage.getItem('user'));
+                    const token = localStorage.getItem('token');
+
+                    if (!user || !token) {
+                        window.location.href = '/index.html';
+                        return;
+                    }
+
+                    const response = await fetch('/api/subscribe', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            plan: selectedPlan,
+                            price: plans[selectedPlan].price
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Update user subscription status
+                        const updatedUser = { ...user, subscription: selectedPlan, subscribed: true };
+                        localStorage.setItem('user', JSON.stringify(updatedUser));
+                        
+                        // Redirect to app
+                        window.location.href = '/app.html';
+                    } else {
+                        setError(data.message || 'Subscription failed. Please try again.');
+                    }
+                } catch (err) {
+                    setError('Network error. Please try again.');
+                }
+
+                setLoading(false);
+            };
+
+            const handleSkip = () => {
+                window.location.href = '/app.html';
+            };
+
+            // Load credit packages and user credits
+            useEffect(() => {
+                const loadData = async () => {
+                    try {
+                        const token = localStorage.getItem('token');
+                        const [packagesResponse, creditsResponse] = await Promise.all([
+                            fetch('/api/credit-packages'),
+                            fetch('/api/credits', {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                            })
+                        ]);
+
+                        const packagesData = await packagesResponse.json();
+                        const creditsData = await creditsResponse.json();
+
+                        if (packagesData.success) {
+                            setCreditPackages(packagesData.packages);
+                        }
+                        if (creditsData.success) {
+                            setUserCredits({
+                                remaining: creditsData.credits_remaining,
+                                subscribed: creditsData.subscribed
+                            });
+                        }
+                    } catch (err) {
+                        console.error('Failed to load data:', err);
+                    }
+                };
+
+                loadData();
+            }, []);
+
+            const handlePurchaseCredits = async (packageId) => {
+                try {
+                    const token = localStorage.getItem('token');
+                    const response = await fetch('/api/purchase-credits', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ package_id: packageId })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        alert(`Successfully purchased ${data.credits_purchased} credits!`);
+                        setUserCredits(prev => ({ ...prev, remaining: data.credits_remaining }));
+                    } else {
+                        alert(data.message || 'Purchase failed');
+                    }
+                } catch (err) {
+                    alert('Purchase failed. Please try again.');
+                }
+            };
+
+            return (
+                <div className="min-h-screen py-12 px-4">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="text-center mb-12">
+                            <h1 className="text-4xl font-bold text-white mb-4">
+                                Choose Your Plan
+                            </h1>
+                            <p className="text-white/80 text-lg">
+                                You have {userCredits.remaining} credits remaining. Subscribe for unlimited access or buy more credits!
+                            </p>
+                            <div className="mt-4 flex justify-center gap-4">
+                                <button
+                                    onClick={() => setShowCreditPackages(false)}
+                                    className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                                        !showCreditPackages ? 'bg-white text-gray-900' : 'bg-white/20 text-white hover:bg-white/30'
+                                    }`}
+                                >
+                                    Subscription Plans
+                                </button>
+                                <button
+                                    onClick={() => setShowCreditPackages(true)}
+                                    className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                                        showCreditPackages ? 'bg-white text-gray-900' : 'bg-white/20 text-white hover:bg-white/30'
+                                    }`}
+                                >
+                                    Buy Credits
+                                </button>
+                            </div>
+                        </div>
+
+                        {!showCreditPackages ? (
+                            <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                                {Object.entries(plans).map(([key, plan]) => (
+                                <div
+                                    key={key}
+                                    className={`glass-effect rounded-2xl p-8 plan-card relative ${
+                                        plan.popular ? 'ring-2 ring-yellow-400' : ''
+                                    }`}
+                                >
+                                    {plan.popular && (
+                                        <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                                            <span className="popular-badge text-white px-4 py-2 rounded-full text-sm font-medium">
+                                                Most Popular
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    <div className="text-center mb-6">
+                                        <h3 className="text-2xl font-bold text-white mb-2">
+                                            {plan.name}
+                                        </h3>
+                                        <p className="text-white/70 mb-4">
+                                            {plan.description}
+                                        </p>
+                                        <div className="text-4xl font-bold text-white">
+                                            ${plan.price}
+                                            <span className="text-lg text-white/70">/{plan.period}</span>
+                                        </div>
+                                        {plan.credits && (
+                                            <p className="text-white/80 text-sm mt-1">Includes {plan.credits.toLocaleString()} credits</p>
+                                        )}
+                                        {plan.popular && (
+                                            <p className="text-yellow-300 text-sm mt-2">
+                                                Save ${(60 * 12) - 576} per year!
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <ul className="space-y-3 mb-8">
+                                        {plan.features.map((feature, index) => (
+                                            <li key={index} className="flex items-center text-white/90">
+                                                <svg className="w-5 h-5 text-green-400 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                                {feature}
+                                            </li>
+                                        ))}
+                                    </ul>
+
+                                    <button
+                                        onClick={() => setSelectedPlan(key)}
+                                        className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
+                                            selectedPlan === key
+                                                ? 'bg-white text-gray-900'
+                                                : 'bg-white/20 text-white hover:bg-white/30'
+                                        }`}
+                                    >
+                                        {selectedPlan === key ? 'Selected' : 'Select Plan'}
+                                    </button>
+                                </div>
+                            ))}
+                            </div>
+                        ) : (
+                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+                                {creditPackages.map((pkg) => (
+                                    <div key={pkg.id} className="glass-effect rounded-2xl p-6 plan-card">
+                                        <div className="text-center mb-6">
+                                            <h3 className="text-xl font-bold text-white mb-2">
+                                                {pkg.name}
+                                            </h3>
+                                            <p className="text-white/70 mb-4">
+                                                {pkg.description}
+                                            </p>
+                                            <div className="text-3xl font-bold text-white">
+                                                ${pkg.price}
+                                            </div>
+                                            <div className="text-lg text-white/70">
+                                                {pkg.credits} credits
+                                            </div>
+                                            <div className="text-sm text-yellow-300 mt-2">
+                                                ${(pkg.price / pkg.credits).toFixed(3)} per credit
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={() => handlePurchaseCredits(pkg.id)}
+                                            className="w-full bg-white text-gray-900 py-3 px-4 rounded-lg font-medium hover:bg-white/90 transition-colors"
+                                        >
+                                            Buy {pkg.credits} Credits
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {error && (
+                            <div className="max-w-md mx-auto mt-6">
+                                <div className="bg-red-500/20 border border-red-500/30 text-red-100 px-4 py-3 rounded-lg text-sm text-center">
+                                    {error}
+                                </div>
+                            </div>
+                        )}
+
+                        {!showCreditPackages && (
+                            <div className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto mt-8">
+                                <button
+                                    onClick={handleSubscribe}
+                                    disabled={loading}
+                                    className="flex-1 bg-white text-gray-900 py-3 px-6 rounded-lg font-medium hover:bg-white/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {loading ? 'Processing...' : `Subscribe for $${plans[selectedPlan].price}/${plans[selectedPlan].period}`}
+                                </button>
+                                <button
+                                    onClick={handleSkip}
+                                    className="flex-1 bg-white/20 text-white py-3 px-6 rounded-lg font-medium hover:bg-white/30 transition-colors"
+                                >
+                                    Maybe Later
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="text-center mt-8">
+                            <p className="text-white/60 text-sm">
+                                {!showCreditPackages 
+                                    ? "All plans include unlimited access to our mosaic creator"
+                                    : "Credits never expire and can be used for any download type"
+                                }
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<SubscriptionApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mystery Mosaic / Color-By-Number — Single File</title>
+  <!-- tailwind (for quick styling) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + ReactDOM + Babel for running JSX in-browser -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- jsPDF (UMD) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    html,body,#root{height:100%;}
+    body{background:linear-gradient(180deg,#f8fafc,#fff);}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useEffect, useMemo, useRef, useState } = React;
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), v>hi?hi:Math.max(lo,v));
+    const hexToRgb = (hex) => {
+      const s = hex.replace('#','');
+      const normalized = s.length === 3 ? s.split('').map(c => c + c).join('') : s;
+      const bigint = parseInt(normalized, 16);
+      return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
+    };
+    const rgbDist2 = (a,b)=>{
+      const dr=a.r-b.r, dg=a.g-b.g, db=a.b-b.b; return dr*dr+dg*dg+db*db;
+    };
+    const toHex = (r,g,b)=> `#${[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('')}`;
+    const pts = (arr) => arr.map(([x,y])=>`${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+
+    const downloadBlob = (content, filename, type) => {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    const svgToPngDataUrl = async (svgEl, scale = 2) => {
+      if(!svgEl) throw new Error('No SVG element provided');
+      const xml = new XMLSerializer().serializeToString(svgEl);
+      const svg64 = btoa(unescape(encodeURIComponent(xml)));
+      const image64 = `data:image/svg+xml;base64,${svg64}`;
+      const img = new Image();
+      return new Promise((resolve, reject) => {
+        img.onload = () => {
+          try {
+            let width = svgEl.viewBox?.baseVal?.width || svgEl.getBoundingClientRect().width;
+            let height = svgEl.viewBox?.baseVal?.height || svgEl.getBoundingClientRect().height;
+            width = Math.max(1, Math.floor(width));
+            height = Math.max(1, Math.floor(height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.floor(width * scale);
+            canvas.height = Math.floor(height * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/png'));
+          } catch (err) { reject(err); }
+        };
+        img.onerror = () => reject(new Error('Failed to load SVG'));
+        img.src = image64;
+      });
+    };
+
+    const downloadSvgAsPng = async (svgEl, filename='mosaic.png', scale=2) => {
+      const dataUrl = await svgToPngDataUrl(svgEl, scale);
+      const a = document.createElement('a'); a.href = dataUrl; a.download = filename; a.click();
+    };
+
+    function MysteryMosaicApp(){
+      const containerRef = useRef(null);
+      const svgRef = useRef(null);
+      const [containerW, setContainerW] = useState(1100);
+
+      const [imgSrc, setImgSrc] = useState(null);
+      const [imgEl, setImgEl] = useState(null);
+      const [imgNatural, setImgNatural] = useState({w:0,h:0});
+
+      const [shape, setShape] = useState('rectangle');
+      const [polygonSides, setPolygonSides] = useState(5);
+      const [cell, setCell] = useState(16);
+      const [stroke, setStroke] = useState(0.75);
+      const [numbersSize, setNumbersSize] = useState(10);
+      const [margin, setMargin] = useState(16);
+      const [fitMode, setFitMode] = useState('fit-width');
+      const [showBorder, setShowBorder] = useState(true);
+      const [mode, setMode] = useState('color');
+
+      const [palette, setPalette] = useState([
+        {hex:'#000000', label:'1'},
+        {hex:'#808080', label:'2'},
+        {hex:'#FFFFFF', label:'3'}
+      ]);
+      const rgbPalette = useMemo(()=>palette.map(p=>({ ...p, rgb: hexToRgb(p.hex) })),[palette]);
+
+      useEffect(()=>{
+        const ro = new ResizeObserver((entries)=>{
+          for(const e of entries){ setContainerW(Math.max(360, Math.floor(e.contentRect.width))); }
+        });
+        if(containerRef.current) ro.observe(containerRef.current);
+        return ()=> ro.disconnect();
+      },[]);
+
+      useEffect(()=>{
+        if(!imgSrc) return;
+        const img = new Image();
+        img.onload = ()=>{ setImgEl(img); setImgNatural({w: img.naturalWidth, h: img.naturalHeight}); };
+        img.src = imgSrc;
+      },[imgSrc]);
+
+      useEffect(()=>{
+        if(!imgEl) return;
+        const w=100, h=100;
+        const c = document.createElement('canvas'); c.width=w; c.height=h;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(imgEl, 0, 0, w, h);
+        const data = ctx.getImageData(0,0,w,h).data;
+
+        const hist = new Map();
+        for(let i=0;i<data.length;i+=4){
+          const r=data[i], g=data[i+1], b=data[i+2];
+          const qR = r>>4, qG = g>>4, qB = b>>4;
+          const key = (qR<<8) | (qG<<4) | qB;
+          hist.set(key, (hist.get(key)||0)+1);
+        }
+        const entries = Array.from(hist.entries()).sort((a,b)=>b[1]-a[1]);
+        const unique = entries.length;
+        let k = Math.round(unique/3);
+        k = Math.min(Math.max(k,3),20);
+        const next = entries.slice(0,k).map(([key],i)=>{
+          const qR=(key>>8)&0xF, qG=(key>>4)&0xF, qB=key&0xF;
+          const r=(qR*16)+8, g=(qG*16)+8, b=(qB*16)+8;
+          return { hex: toHex(r,g,b), label: String(i+1) };
+        });
+        setPalette(next);
+      }, [imgEl]);
+
+      const sampleCanvasRef = useRef(null);
+      const [cells, setCells] = useState([]);
+      const [svgSize, setSvgSize] = useState({ w: 900, h: 650 });
+
+      useEffect(()=>{
+        if(!imgEl) { setCells([]); return; }
+        const maxW = containerW - margin*2;
+        const aspect = imgNatural.h ? (imgNatural.w / imgNatural.h) : 1;
+        let drawW = maxW;
+        let drawH = drawW / aspect;
+        if(fitMode==='original'){
+          drawW = Math.min(maxW, imgNatural.w);
+          drawH = drawW / aspect;
+        }
+        const sCanvas = sampleCanvasRef.current || (sampleCanvasRef.current=document.createElement('canvas'));
+        const sctx = sCanvas.getContext('2d', { willReadFrequently: true });
+        sctx.imageSmoothingEnabled = true;
+        const mapToPalette = (r,g,b)=>{
+          let best=0, bestD=Infinity;
+          for(let i=0;i<rgbPalette.length;i++){
+            const d = rgbDist2({r,g,b}, rgbPalette[i].rgb);
+            if(d<bestD){ bestD=d; best=i; }
+          }
+          return best;
+        };
+
+        if(['rectangle','triangle','circle','polygon'].includes(shape)){
+          const cols = Math.max(2, Math.floor(drawW / cell));
+          const rows = Math.max(2, Math.floor(drawH / cell));
+          const gx = drawW / cols;
+          const gy = drawH / rows;
+
+          sCanvas.width = cols; sCanvas.height = rows;
+          sctx.clearRect(0,0,cols,rows);
+          sctx.drawImage(imgEl, 0,0, imgNatural.w, imgNatural.h, 0,0, cols, rows);
+          const imgData = sctx.getImageData(0,0,cols,rows).data;
+
+          const out=[];
+          for(let y=0;y<rows;y++){
+            for(let x=0;x<cols;x++){
+              const idx=(y*cols+x)*4;
+              const r=imgData[idx], g=imgData[idx+1], b=imgData[idx+2];
+              const colorIdx = mapToPalette(r,g,b);
+              if(shape==='triangle'){
+                out.push({ type:'tri', x, y, half:0, cx:(x+0.5)*gx, cy:(y+0.5)*gy, w:gx, h:gy, colorIdx });
+                out.push({ type:'tri', x, y, half:1, cx:(x+0.5)*gx, cy:(y+0.5)*gy, w:gx, h:gy, colorIdx });
+              } else {
+                out.push({ type:shape, x, y, cx:(x+0.5)*gx, cy:(y+0.5)*gy, w:gx, h:gy, colorIdx });
+              }
+            }
+          }
+          setCells(out.map(c=>({ ...c, label: palette[c.colorIdx]?.label || String(c.colorIdx+1) })));
+          setSvgSize({ w: Math.round(drawW)+margin*2, h: Math.round(drawH)+margin*2 });
+        }
+
+        if(shape==='hex'){
+          const r = Math.max(6, cell);
+          const hexHeight = Math.sqrt(3)*r;
+          const horiz = 1.5*r;
+          const cols = Math.max(2, Math.floor((drawW - r) / horiz)) || 2;
+
+          sCanvas.width = Math.max(1, Math.floor(drawW / Math.max(1, r)));
+          sCanvas.height = Math.max(1, Math.floor(drawH / Math.max(1, r)));
+          sctx.clearRect(0,0,sCanvas.width,sCanvas.height);
+          sctx.drawImage(imgEl, 0,0, imgNatural.w, imgNatural.h, 0,0, sCanvas.width, sCanvas.height);
+
+          const getColorIdxAt = (x, y)=>{
+            const sx = clamp(Math.floor(x / drawW * sCanvas.width), 0, sCanvas.width-1);
+            const sy = clamp(Math.floor(y / drawH * sCanvas.height), 0, sCanvas.height-1);
+            const d = sctx.getImageData(sx, sy, 1,1).data;
+            return mapToPalette(d[0], d[1], d[2]);
+          };
+
+          const centers=[];
+          for(let col=0; col<cols; col++){
+            const cx = r + col*horiz;
+            const colOffsetY = (col%2===1) ? hexHeight/2 : 0;
+            for(let row=0; ; row++){
+              const cy = r + row*hexHeight + colOffsetY;
+              if(cy > drawH - r) break;
+              if(cx > drawW - r) continue;
+              const colorIdx = getColorIdxAt(cx, cy);
+              centers.push({ type:'hex', cx, cy, r, colorIdx });
+            }
+          }
+          setCells(centers.map((c,i)=>({ ...c, label: palette[c.colorIdx]?.label || String(c.colorIdx+1) })));
+          setSvgSize({ w: Math.round(drawW)+margin*2, h: Math.round(drawH)+margin*2 });
+        }
+      }, [imgEl, imgNatural.w, imgNatural.h, shape, cell, margin, fitMode, containerW, rgbPalette, palette]);
+
+      const svgNode = useMemo(()=>{
+        if(!imgEl || cells.length===0) return null;
+        const strokeAttr = stroke>0 ? { stroke:'#000', strokeWidth: stroke } : {};
+        const { w:svgW, h:svgH } = svgSize;
+        const gX = margin, gY = margin;
+        const elements = [];
+        elements.push(React.createElement('rect',{ key:'bg', x:0, y:0, width:svgW, height:svgH, fill:'#fff'}));
+        const getFill = (colorIdx)=> mode==='numbers' ? '#ffffff' : (palette[colorIdx]?.hex || '#000');
+        const labelY = (cy)=> cy + numbersSize/3;
+        for(let i=0;i<cells.length;i++){
+          const c = cells[i];
+          if(c.type==='rectangle'){
+            const x = gX + (c.cx - c.w/2);
+            const y = gY + (c.cy - c.h/2);
+            elements.push(React.createElement('rect',{ key:`r-${c.x}-${c.y}`, x, y, width:c.w, height:c.h, fill:getFill(c.colorIdx), ...strokeAttr }));
+            elements.push(React.createElement('text',{ key:`rt-${c.x}-${c.y}`, x:gX+c.cx, y:gY+labelY(c.cy), fontSize:numbersSize, textAnchor:'middle', fill:'#000' }, c.label));
+          }
+          if(c.type==='tri'){
+            const x0=gX+(c.cx-c.w/2), y0=gY+(c.cy-c.h/2);
+            const x1=x0+c.w, y1=y0+c.h;
+            const points = c.half===0 ? pts([[x0,y1],[x1,y1],[x0+c.w/2,y0]]) : pts([[x0,y0],[x1,y0],[x0+c.w/2,y1]]);
+            elements.push(React.createElement('polygon',{ key:`t-${c.x}-${c.y}-${c.half}`, points, fill:getFill(c.colorIdx), ...strokeAttr }));
+            elements.push(React.createElement('text',{ key:`tt-${c.x}-${c.y}-${c.half}`, x:gX+c.cx, y:gY+labelY(c.cy), fontSize:numbersSize, textAnchor:'middle', fill:'#000' }, c.label));
+          }
+          if(c.type==='circle'){
+            const cx=gX+c.cx, cy=gY+c.cy;
+            const r = Math.max(0, Math.min(c.w,c.h)/2 - stroke/2);
+            elements.push(React.createElement('circle',{ key:`c-${c.x}-${c.y}`, cx, cy, r, fill:getFill(c.colorIdx), ...strokeAttr }));
+            elements.push(React.createElement('text',{ key:`ct-${c.x}-${c.y}`, x:cx, y:gY+labelY(c.cy), fontSize:numbersSize, textAnchor:'middle', fill:'#000' }, c.label));
+          }
+          if(c.type==='hex'){
+            const r = Math.max(6, cell);
+            const cx=gX+c.cx, cy=gY+c.cy;
+            const poly=[0,1,2,3,4,5].map(k=>{
+              const ang=(Math.PI/3)*k - Math.PI/6;
+              return [cx + r*Math.cos(ang), cy + r*Math.sin(ang)];
+            });
+            elements.push(React.createElement('polygon',{ key:`h-${i}`, points:pts(poly), fill:getFill(c.colorIdx), ...strokeAttr }));
+            elements.push(React.createElement('text',{ key:`ht-${i}`, x:cx, y:gY+labelY(c.cy), fontSize:numbersSize, textAnchor:'middle', fill:'#000' }, c.label));
+          }
+          if(c.type==='polygon'){
+            const n = Math.max(3, Math.min(12, polygonSides|0));
+            const cx=gX+c.cx, cy=gY+c.cy;
+            const r = Math.max(0, Math.min(c.w,c.h)/2 - stroke/2);
+            const poly=[...Array(n)].map((_,k)=>{
+              const ang = (2*Math.PI*k)/n - Math.PI/2;
+              return [cx + r*Math.cos(ang), cy + r*Math.sin(ang)];
+            });
+            elements.push(React.createElement('polygon',{ key:`p-${c.x}-${c.y}`, points:pts(poly), fill:getFill(c.colorIdx), ...strokeAttr }));
+            elements.push(React.createElement('text',{ key:`pt-${c.x}-${c.y}`, x:cx, y:gY+labelY(c.cy), fontSize:numbersSize, textAnchor:'middle', fill:'#000' }, c.label));
+          }
+        }
+        if(showBorder){ elements.push(React.createElement('rect',{ key:'border', x:0, y:0, width:svgW, height:svgH, fill:'none', stroke:'#000', strokeWidth:0.5 })); }
+        return React.createElement('svg',{ ref: svgRef, width: svgW, height: svgH, viewBox: `0 0 ${svgW} ${svgH}`, xmlns: 'http://www.w3.org/2000/svg' }, React.createElement('g', null, elements));
+      }, [imgEl, cells, svgSize, margin, stroke, numbersSize, showBorder, palette, mode, polygonSides, cell]);
+
+      const addPaletteColor = ()=> setPalette(p=>[...p, {hex:'#cccccc', label:String(p.length+1)}]);
+      const updatePalette = (idx, field, value)=> setPalette(p=>{ const np=[...p]; np[idx] = { ...np[idx], [field]: value }; return np; });
+      const removePalette = (idx)=> setPalette(p=> p.filter((_,i)=>i!==idx).map((c,i)=>({ ...c, label: c.label || String(i+1)})) );
+      const movePalette = (idx, dir)=> setPalette(p=>{ const np=[...p]; const j=idx+dir; if(j<0||j>=np.length) return np; const tmp=np[idx]; np[idx]=np[j]; np[j]=tmp; return np.map((c,i)=>({ ...c, label: c.label || String(i+1)})); });
+
+      const canRender = !!svgNode;
+      const downloadSvg = ()=>{
+        if(!svgRef.current) return;
+        const xml = new XMLSerializer().serializeToString(svgRef.current);
+        downloadBlob(xml, 'mystery-mosaic.svg', 'image/svg+xml');
+      };
+      const downloadPng = ()=>{ if(svgRef.current) downloadSvgAsPng(svgRef.current, 'mystery-mosaic.png', 2); };
+      const downloadPdf = async ()=>{
+        if(!svgRef.current) return;
+        try{
+          const pngDataUrl = await svgToPngDataUrl(svgRef.current, 2);
+          const doc = new window.jspdf.jsPDF({ unit: 'px', format: [svgSize.w, svgSize.h] });
+          doc.addImage(pngDataUrl, 'PNG', 0, 0, svgSize.w, svgSize.h);
+          doc.save('mystery-mosaic.pdf');
+        }catch(err){ console.error(err); alert('PDF export failed: '+(err.message||err)); }
+      };
+
+      const onFile = (f)=>{ if(!f) return; const reader=new FileReader(); reader.onload=(e)=>setImgSrc(e.target.result); reader.readAsDataURL(f); };
+
+      return (
+        <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white text-slate-900" ref={containerRef}>
+          <header className="sticky top-0 z-10 backdrop-blur bg-white/70 border-b border-slate-200">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+              <div className="font-bold text-xl">Mystery Mosaic / Color-By-Number</div>
+              <div className="text-sm text-slate-500">Rectangle • Triangle • Circle • Hex • Polygon</div>
+            </div>
+          </header>
+
+          <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <section className="lg:col-span-1">
+              <div className="p-4 bg-white rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Upload Image</label>
+                  <input type="file" accept="image/*" onChange={(e)=>onFile(e.target.files?.[0])} className="block w-full text-sm" />
+                  {imgEl && (<div className="mt-2 text-xs text-slate-600">Loaded: {imgNatural.w}×{imgNatural.h}px</div>)}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Shape</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['rectangle','triangle','circle','hex','polygon'].map(s=> (
+                      <button key={s} onClick={()=>setShape(s)} className={`px-3 py-2 rounded-xl border text-sm capitalize ${shape===s? 'bg-slate-900 text-white border-slate-900':'bg-white hover:bg-slate-50 border-slate-300'}`}>{s}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {shape==='polygon' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Polygon Sides</label>
+                    <input type="range" min={3} max={12} value={polygonSides} onChange={(e)=>setPolygonSides(parseInt(e.target.value))} className="w-full" />
+                    <div className="text-xs text-slate-600">{polygonSides} sides</div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Cell Size</label>
+                    <input type="range" min={6} max={64} value={cell} onChange={(e)=>setCell(parseInt(e.target.value))} className="w-full" />
+                    <div className="text-xs text-slate-600">{cell}px</div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Line Width</label>
+                    <input type="range" min={0} max={3} step={0.25} value={stroke} onChange={(e)=>setStroke(parseFloat(e.target.value))} className="w-full" />
+                    <div className="text-xs text-slate-600">{stroke}px</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Numbers Size</label>
+                    <input type="range" min={6} max={24} value={numbersSize} onChange={(e)=>setNumbersSize(parseInt(e.target.value))} className="w-full" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Canvas Margin</label>
+                    <input type="range" min={0} max={64} value={margin} onChange={(e)=>setMargin(parseInt(e.target.value))} className="w-full" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Fit</label>
+                    <select value={fitMode} onChange={(e)=>setFitMode(e.target.value)} className="w-full px-2 py-2 rounded-lg border border-slate-300 bg-white text-sm">
+                      <option value="fit-width">Fit to width</option>
+                      <option value="original">Original scale</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Canvas Border</label>
+                    <div className="flex items-center gap-2"><input type="checkbox" checked={showBorder} onChange={(e)=>setShowBorder(e.target.checked)} /> <span className="text-sm">Show border</span></div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Preview Mode</label>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="radio" name="mode" value="color" checked={mode==='color'} onChange={()=>setMode('color')} />
+                      <span>Color Mode</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="radio" name="mode" value="numbers" checked={mode==='numbers'} onChange={()=>setMode('numbers')} />
+                      <span>Numbers Mode (grid + numbers only)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-medium">Palette (auto from image • editable)</label>
+                    <button onClick={addPaletteColor} className="text-sm px-2 py-1 rounded-lg bg-slate-900 text-white">Add</button>
+                  </div>
+                  <div className="mt-2 space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {palette.map((p,idx)=> (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input type="color" value={p.hex} onChange={(e)=>updatePalette(idx,'hex',e.target.value)} className="w-10 h-10 rounded" />
+                        <input type="text" value={p.label} onChange={(e)=>updatePalette(idx,'label',e.target.value)} className="flex-1 px-2 py-2 rounded-lg border border-slate-300 text-sm" placeholder={`#${idx+1}`} />
+                        <div className="flex items-center gap-1">
+                          <button onClick={()=>movePalette(idx,-1)} className="px-2 py-1 rounded-lg border text-xs">↑</button>
+                          <button onClick={()=>movePalette(idx, 1)} className="px-2 py-1 rounded-lg border text-xs">↓</button>
+                          <button onClick={()=>removePalette(idx)} className="px-2 py-1 rounded-lg border text-xs text-red-600">✕</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 text-xs text-slate-600">Tip: Reorder colors to change their numbers.</div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 flex flex-wrap gap-2">
+                  <button disabled={!canRender} onClick={downloadSvg} className={`px-3 py-2 rounded-xl border ${canRender? 'bg-white hover:bg-slate-50 border-slate-300':'bg-slate-100 border-slate-200 text-slate-400'}`}>Download SVG</button>
+                  <button disabled={!canRender} onClick={downloadPng} className={`px-3 py-2 rounded-xl border ${canRender? 'bg-white hover:bg-slate-50 border-slate-300':'bg-slate-100 border-slate-200 text-slate-400'}`}>Download PNG</button>
+                  <button disabled={!canRender} onClick={downloadPdf} className={`px-3 py-2 rounded-xl border ${canRender? 'bg-white hover:bg-slate-50 border-slate-300':'bg-slate-100 border-slate-200 text-slate-400'}`}>Download PDF</button>
+                </div>
+              </div>
+            </section>
+
+            <section className="lg:col-span-2">
+              <div className="p-3 bg-white rounded-2xl shadow-sm border border-slate-200">
+                {!imgEl ? (
+                  <div className="aspect-video w-full grid place-items-center text-slate-500">
+                    <div className="text-center">
+                      <div className="text-lg font-medium">Upload an image to begin</div>
+                      <div className="text-sm">JPG • PNG • GIF • WebP</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full overflow-auto" style={{ maxWidth: '100%' }}>{svgNode}</div>
+                )}
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {palette.map((p, idx)=> (
+                  <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-white border border-slate-200">
+                    <div className="w-8 h-8 rounded-lg border" style={{ background: p.hex }} />
+                    <div className="text-sm"><span className="font-semibold mr-1">{p.label || (idx+1)}</span><span className="text-slate-600">{p.hex}</span></div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 p-4 bg-slate-50 rounded-2xl border border-slate-200 text-sm leading-6">
+                <div className="font-semibold mb-1">How to use</div>
+                <ol className="list-decimal pl-5 space-y-1 text-slate-700">
+                  <li>Upload an image. The color palette is generated automatically and can be edited.</li>
+                  <li>Pick a shape (Rectangle, Triangle, Circle, Hex, Polygon). If Polygon, choose the number of sides.</li>
+                  <li>Adjust cell size, line width, numbers size, margin, and fit.</li>
+                  <li>Switch between <strong>Color Mode</strong> and <strong>Numbers Mode</strong> with the toggle.</li>
+                  <li>Download your mosaic as <strong>SVG</strong>, <strong>PNG</strong>, or <strong>PDF</strong>.</li>
+                </ol>
+              </div>
+            </section>
+          </main>
+
+          <footer className="max-w-6xl mx-auto px-4 pb-10 pt-2 text-xs text-slate-500">Built with ❤️ — all processing happens in your browser.</footer>
+          <canvas ref={sampleCanvasRef} style={{display:'none'}}/>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(MysteryMosaicApp));
+  </script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mystery Mosaic - Admin Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function AdminPanel() {
+            const [user, setUser] = useState(null);
+            const [users, setUsers] = useState([]);
+            const [stats, setStats] = useState({});
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState('');
+            const [selectedUser, setSelectedUser] = useState(null);
+            const [creditAction, setCreditAction] = useState({ action: 'add', amount: 0, description: '' });
+            const [searchTerm, setSearchTerm] = useState('');
+            const [currentPage, setCurrentPage] = useState(1);
+
+            // Check admin authentication
+            useEffect(() => {
+                const checkAuth = async () => {
+                    const userData = localStorage.getItem('user');
+                    const token = localStorage.getItem('token');
+                    
+                    if (!userData || !token) {
+                        window.location.href = '/index.html';
+                        return;
+                    }
+
+                    const userObj = JSON.parse(userData);
+                    if (userObj.user_type !== 'admin') {
+                        alert('Admin access required');
+                        window.location.href = '/app.html';
+                        return;
+                    }
+
+                    setUser(userObj);
+                    await loadData();
+                };
+
+                checkAuth();
+            }, []);
+
+            const loadData = async () => {
+                try {
+                    const token = localStorage.getItem('token');
+                    const [usersResponse, statsResponse] = await Promise.all([
+                        fetch(`/api/admin/users?page=${currentPage}&search=${searchTerm}`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        }),
+                        fetch('/api/admin/stats', {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        })
+                    ]);
+
+                    const usersData = await usersResponse.json();
+                    const statsData = await statsResponse.json();
+
+                    if (usersData.success) {
+                        setUsers(usersData.users);
+                    }
+                    if (statsData.success) {
+                        setStats(statsData.stats);
+                    }
+                } catch (err) {
+                    setError('Failed to load data');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                if (user) {
+                    loadData();
+                }
+            }, [currentPage, searchTerm, user]);
+
+            const handleCreditAction = async () => {
+                if (!selectedUser || !creditAction.amount) {
+                    alert('Please select a user and enter an amount');
+                    return;
+                }
+
+                try {
+                    const token = localStorage.getItem('token');
+                    const response = await fetch('/api/admin/credits', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            user_id: selectedUser.id,
+                            action: creditAction.action,
+                            amount: parseInt(creditAction.amount),
+                            description: creditAction.description
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        alert(`Credits ${creditAction.action}ed successfully!`);
+                        setCreditAction({ action: 'add', amount: 0, description: '' });
+                        setSelectedUser(null);
+                        loadData();
+                    } else {
+                        alert(data.message || 'Action failed');
+                    }
+                } catch (err) {
+                    alert('Action failed. Please try again.');
+                }
+            };
+
+            const handleMonthlyReset = async () => {
+                if (!confirm('Are you sure you want to reset monthly credits for all free users?')) {
+                    return;
+                }
+
+                try {
+                    const token = localStorage.getItem('token');
+                    const response = await fetch('/api/admin/reset-monthly-credits', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        alert(`Monthly reset completed! ${data.users_reset} users reset.`);
+                        loadData();
+                    } else {
+                        alert(data.message || 'Reset failed');
+                    }
+                } catch (err) {
+                    alert('Reset failed. Please try again.');
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
+                            <p className="mt-4 text-white">Loading admin panel...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen py-8 px-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="bg-white rounded-2xl p-6 mb-8 shadow-lg">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
+                                    <p className="text-gray-600">Manage users and credits</p>
+                                </div>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => window.location.href = '/app.html'}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                    >
+                                        Back to App
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            localStorage.removeItem('user');
+                                            localStorage.removeItem('token');
+                                            window.location.href = '/index.html';
+                                        }}
+                                        className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                                    >
+                                        Logout
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Stats Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                            <div className="bg-white rounded-xl p-6 shadow-lg">
+                                <div className="text-2xl font-bold text-blue-600">{stats.total_users || 0}</div>
+                                <div className="text-gray-600">Total Users</div>
+                            </div>
+                            <div className="bg-white rounded-xl p-6 shadow-lg">
+                                <div className="text-2xl font-bold text-green-600">{stats.subscribed_users || 0}</div>
+                                <div className="text-gray-600">Subscribed Users</div>
+                            </div>
+                            <div className="bg-white rounded-xl p-6 shadow-lg">
+                                <div className="text-2xl font-bold text-purple-600">{stats.total_credits_in_circulation || 0}</div>
+                                <div className="text-gray-600">Credits in Circulation</div>
+                            </div>
+                            <div className="bg-white rounded-xl p-6 shadow-lg">
+                                <div className="text-2xl font-bold text-orange-600">
+                                    {stats.total_users ? Math.round((stats.subscribed_users / stats.total_users) * 100) : 0}%
+                                </div>
+                                <div className="text-gray-600">Conversion Rate</div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            {/* User Management */}
+                            <div className="lg:col-span-2">
+                                <div className="bg-white rounded-xl p-6 shadow-lg">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <h2 className="text-xl font-bold text-gray-900">User Management</h2>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                placeholder="Search users..."
+                                                value={searchTerm}
+                                                onChange={(e) => setSearchTerm(e.target.value)}
+                                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                            />
+                                            <button
+                                                onClick={handleMonthlyReset}
+                                                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm"
+                                            >
+                                                Monthly Reset
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="border-b">
+                                                    <th className="text-left py-2">Email</th>
+                                                    <th className="text-left py-2">Type</th>
+                                                    <th className="text-left py-2">Credits</th>
+                                                    <th className="text-left py-2">Subscribed</th>
+                                                    <th className="text-left py-2">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {users.map((u) => (
+                                                    <tr key={u.id} className="border-b hover:bg-gray-50">
+                                                        <td className="py-2">{u.email}</td>
+                                                        <td className="py-2">
+                                                            <span className={`px-2 py-1 rounded-full text-xs ${
+                                                                u.user_type === 'admin' ? 'bg-red-100 text-red-800' :
+                                                                u.user_type === 'premium' ? 'bg-purple-100 text-purple-800' :
+                                                                'bg-gray-100 text-gray-800'
+                                                            }`}>
+                                                                {u.user_type}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 font-medium">{u.credits_remaining}</td>
+                                                        <td className="py-2">
+                                                            <span className={`px-2 py-1 rounded-full text-xs ${
+                                                                u.subscribed ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                                            }`}>
+                                                                {u.subscribed ? 'Yes' : 'No'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2">
+                                                            <button
+                                                                onClick={() => setSelectedUser(u)}
+                                                                className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition-colors"
+                                                            >
+                                                                Manage
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Pagination */}
+                                    <div className="flex justify-center mt-4">
+                                        <button
+                                            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                                            disabled={currentPage === 1}
+                                            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-l disabled:opacity-50"
+                                        >
+                                            Previous
+                                        </button>
+                                        <span className="px-4 py-1 bg-gray-100 text-gray-700">
+                                            Page {currentPage}
+                                        </span>
+                                        <button
+                                            onClick={() => setCurrentPage(currentPage + 1)}
+                                            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-r"
+                                        >
+                                            Next
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Credit Management */}
+                            <div className="space-y-6">
+                                {/* Credit Action Form */}
+                                {selectedUser && (
+                                    <div className="bg-white rounded-xl p-6 shadow-lg">
+                                        <h3 className="text-lg font-bold text-gray-900 mb-4">
+                                            Manage Credits for {selectedUser.email}
+                                        </h3>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Action
+                                                </label>
+                                                <select
+                                                    value={creditAction.action}
+                                                    onChange={(e) => setCreditAction({...creditAction, action: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                                >
+                                                    <option value="add">Add Credits</option>
+                                                    <option value="remove">Remove Credits</option>
+                                                    <option value="reset">Reset to 5</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Amount
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={creditAction.amount}
+                                                    onChange={(e) => setCreditAction({...creditAction, amount: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                                    placeholder="Enter amount"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Description
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={creditAction.description}
+                                                    onChange={(e) => setCreditAction({...creditAction, description: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                                    placeholder="Optional description"
+                                                />
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={handleCreditAction}
+                                                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+                                                >
+                                                    Execute
+                                                </button>
+                                                <button
+                                                    onClick={() => setSelectedUser(null)}
+                                                    className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Recent Transactions */}
+                                <div className="bg-white rounded-xl p-6 shadow-lg">
+                                    <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Transactions</h3>
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {stats.recent_transactions && stats.recent_transactions.length > 0 ? (
+                                            stats.recent_transactions.map((transaction, index) => (
+                                                <div key={index} className="text-xs border-b pb-2">
+                                                    <div className="flex justify-between">
+                                                        <span className="truncate">{transaction.email}</span>
+                                                        <span className={`font-medium ${
+                                                            transaction.credits_used > 0 ? 'text-red-600' : 'text-green-600'
+                                                        }`}>
+                                                            {transaction.credits_used > 0 ? `-${transaction.credits_used}` : `+${transaction.credits_added}`}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-gray-500 truncate">{transaction.description}</div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <p className="text-gray-500 text-sm">No recent transactions</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<AdminPanel />, document.getElementById('root'));
+    </script>
+</body>
+</html>
+
+
+
+

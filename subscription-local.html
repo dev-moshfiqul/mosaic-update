@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mystery Mosaic - Subscription Plans</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        .plan-card {
+            transition: all 0.3s ease;
+        }
+        .plan-card:hover {
+            transform: translateY(-5px);
+        }
+        .popular-badge {
+            background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function SubscriptionApp() {
+            const [selectedPlan, setSelectedPlan] = useState('yearly');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [showPayment, setShowPayment] = useState(false);
+            const [paymentData, setPaymentData] = useState({
+                cardNumber: '',
+                expiryDate: '',
+                cvv: '',
+                name: ''
+            });
+            const [user, setUser] = useState(null);
+
+            useEffect(() => {
+                const userData = localStorage.getItem('mystery_mosaic_current_user');
+                if (!userData) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+                setUser(JSON.parse(userData));
+            }, []);
+
+            const plans = {
+                monthly: {
+                    name: 'Monthly Plan',
+                    price: 60,
+                    period: 'month',
+                    credits: 400,
+                    description: 'Perfect for trying out our service',
+                    features: [
+                        '400 mosaic creation',
+                        'All shape types',
+                        'High-quality exports',
+                        'Priority support'
+                    ]
+                },
+                yearly: {
+                    name: 'Yearly Plan',
+                    price: 576,
+                    period: 'year',
+                    credits: 5000,
+                    description: 'Best value for regular users',
+                    features: [
+                        '5000 mosaic creation',
+                        '20% Discount!',
+                        'All shape types',
+                        'High-quality exports',
+                        'Priority support',
+                        'Early access to new features'
+                    ],
+                    popular: true
+                }
+            };
+
+            const PAYMENT_LINK = 'https://gencolorbynumber.paymently.io/paymentlink/pay/r1LpakUMZzuEz5Ox9681Q2C6YcISNjo1PPszFlID';
+            const PAYMENT_LINK_YEARLY = 'https://gencolorbynumber.paymently.io/paymentlink/pay/8EWysM6rHQnUq9gWy3hzVevSJ7WR2mBLDjmfKtuT';
+
+            const handleSubscribeClick = () => {
+                if (selectedPlan === 'monthly') {
+                    window.location.href = PAYMENT_LINK;
+                    return;
+                }
+                if (selectedPlan === 'yearly') {
+                    window.location.href = PAYMENT_LINK_YEARLY;
+                    return;
+                }
+                setShowPayment(true);
+            };
+
+            const handlePayment = async () => {
+                setLoading(true);
+                setError('');
+
+                // Validate payment data
+                if (!paymentData.cardNumber || !paymentData.expiryDate || !paymentData.cvv || !paymentData.name) {
+                    setError('Please fill in all payment details');
+                    setLoading(false);
+                    return;
+                }
+
+                // Simulate payment processing
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                // Simulate payment success (90% success rate)
+                const paymentSuccess = Math.random() > 0.1;
+
+                if (paymentSuccess) {
+                    const assignedCredits = selectedPlan === 'monthly' ? plans.monthly.credits : plans.yearly.credits;
+                    // Update user subscription status
+                    const updatedUser = { 
+                        ...user, 
+                        subscribed: true, 
+                        subscription_plan: selectedPlan,
+                        subscription_date: new Date().toISOString(),
+                        creditsRemaining: assignedCredits
+                    };
+                    
+                    setUser(updatedUser);
+                    localStorage.setItem('mystery_mosaic_current_user', JSON.stringify(updatedUser));
+                    
+                    // Update users array
+                    const users = JSON.parse(localStorage.getItem('mystery_mosaic_users') || '[]');
+                    const userIndex = users.findIndex(u => u.id === user.id);
+                    if (userIndex !== -1) {
+                        users[userIndex].subscribed = true;
+                        users[userIndex].subscription_plan = selectedPlan;
+                        users[userIndex].subscription_date = new Date().toISOString();
+                        users[userIndex].creditsRemaining = assignedCredits;
+                        localStorage.setItem('mystery_mosaic_users', JSON.stringify(users));
+                    }
+
+                    alert(`Payment successful! Welcome to ${plans[selectedPlan].name}!`);
+                    window.location.href = 'app-local.html';
+                } else {
+                    setError('Payment failed. Please check your card details and try again.');
+                }
+
+                setLoading(false);
+            };
+
+            const handleSkip = () => {
+                window.location.href = 'app-local.html';
+            };
+
+            if (!user) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
+                            <p className="mt-4 text-white">Loading...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (showPayment) {
+                return (
+                    <div className="min-h-screen py-12 px-4">
+                        <div className="max-w-md mx-auto">
+                            <div className="glass-effect rounded-2xl p-8 shadow-2xl">
+                                <div className="text-center mb-6">
+                                    <h1 className="text-2xl font-bold text-white mb-2">
+                                        Payment Details
+                                    </h1>
+                                    <p className="text-white/80">
+                                        Complete your {plans[selectedPlan].name} subscription
+                                    </p>
+                                    <div className="mt-2 text-yellow-200 text-sm">
+                                        💳 Demo Payment - No real charges
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-white mb-2">
+                                            Card Number
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={paymentData.cardNumber}
+                                            onChange={(e) => setPaymentData({...paymentData, cardNumber: e.target.value})}
+                                            className="w-full px-4 py-3 rounded-lg bg-white/90 border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/50"
+                                            placeholder="1234 5678 9012 3456"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-white mb-2">
+                                                Expiry Date
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={paymentData.expiryDate}
+                                                onChange={(e) => setPaymentData({...paymentData, expiryDate: e.target.value})}
+                                                className="w-full px-4 py-3 rounded-lg bg-white/90 border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/50"
+                                                placeholder="MM/YY"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-white mb-2">
+                                                CVV
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={paymentData.cvv}
+                                                onChange={(e) => setPaymentData({...paymentData, cvv: e.target.value})}
+                                                className="w-full px-4 py-3 rounded-lg bg-white/90 border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/50"
+                                                placeholder="123"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-white mb-2">
+                                            Cardholder Name
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={paymentData.name}
+                                            onChange={(e) => setPaymentData({...paymentData, name: e.target.value})}
+                                            className="w-full px-4 py-3 rounded-lg bg-white/90 border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/50"
+                                            placeholder="John Doe"
+                                        />
+                                    </div>
+
+                                    {error && (
+                                        <div className="bg-red-500/20 border border-red-500/30 text-red-100 px-4 py-3 rounded-lg text-sm">
+                                            {error}
+                                        </div>
+                                    )}
+
+                                    <div className="flex gap-4">
+                                        <button
+                                            onClick={handlePayment}
+                                            disabled={loading}
+                                            className="flex-1 bg-white text-gray-900 py-3 px-4 rounded-lg font-medium hover:bg-white/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {loading ? 'Processing...' : `Pay $${plans[selectedPlan].price}`}
+                                        </button>
+                                        <button
+                                            onClick={() => setShowPayment(false)}
+                                            className="flex-1 bg-white/20 text-white py-3 px-4 rounded-lg font-medium hover:bg-white/30 transition-colors"
+                                        >
+                                            Back
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 p-4 bg-white/10 rounded-lg">
+                                    <div className="text-white/80 text-sm">
+                                        <div className="font-medium mb-2">Demo Payment Info:</div>
+                                        <div>• Use any card number (e.g., 1234 5678 9012 3456)</div>
+                                        <div>• Any expiry date (e.g., 12/25)</div>
+                                        <div>• Any CVV (e.g., 123)</div>
+                                        <div>• Any name</div>
+                                        <div className="mt-2 text-yellow-200">No real payment will be processed!</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen py-12 px-4">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="text-center mb-12">
+                            <h1 className="text-4xl font-bold text-white mb-4">
+                                Choose Your Plan
+                            </h1>
+                            <p className="text-white/80 text-lg">
+                                You've used your 5 free demos. Subscribe to continue creating beautiful mosaics!
+                            </p>
+                        </div>
+
+                        <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                            {Object.entries(plans).map(([key, plan]) => (
+                                <div
+                                    key={key}
+                                    className={`glass-effect rounded-2xl p-8 plan-card relative ${
+                                        plan.popular ? 'ring-2 ring-yellow-400' : ''
+                                    }`}
+                                >
+                                    {plan.popular && (
+                                        <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                                            <span className="popular-badge text-white px-4 py-2 rounded-full text-sm font-medium">
+                                                Most Popular
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    <div className="text-center mb-6">
+                                        <h3 className="text-2xl font-bold text-white mb-2">
+                                            {plan.name}
+                                        </h3>
+                                        <p className="text-white/70 mb-4">
+                                            {plan.description}
+                                        </p>
+                                        <div className="text-4xl font-bold text-white">
+                                            ${plan.price}
+                                            <span className="text-lg text-white/70">/{plan.period}</span>
+                                        </div>
+                                        <div className="text-white/80 text-sm mt-1">
+                                            {plan.credits} credits included
+                                        </div>
+                                        {plan.popular && key==='yearly' && (
+                                            <p className="text-yellow-300 text-sm mt-2">
+                                                Save ${(plans.monthly.price * 12) - plan.price} per year!
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <ul className="space-y-3 mb-8">
+                                        {plan.features.map((feature, index) => (
+                                            <li key={index} className="flex items-center text-white/90">
+                                                <svg className="w-5 h-5 text-green-400 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                                {feature}
+                                            </li>
+                                        ))}
+                                    </ul>
+
+                                    <button
+                                        onClick={() => setSelectedPlan(key)}
+                                        className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
+                                            selectedPlan === key
+                                                ? 'bg-white text-gray-900'
+                                                : 'bg-white/20 text-white hover:bg-white/30'
+                                        }`}
+                                    >
+                                        {selectedPlan === key ? 'Selected' : 'Select Plan'}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        {error && (
+                            <div className="max-w-md mx-auto mt-6">
+                                <div className="bg-red-500/20 border border-red-500/30 text-red-100 px-4 py-3 rounded-lg text-sm text-center">
+                                    {error}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto mt-8">
+                            <button
+                                onClick={handleSubscribeClick}
+                                className="flex-1 bg-white text-gray-900 py-3 px-6 rounded-lg font-medium hover:bg-white/90 transition-colors"
+                            >
+                                Subscribe for ${plans[selectedPlan].price}/{plans[selectedPlan].period}
+                            </button>
+                            <button
+                                onClick={handleSkip}
+                                className="flex-1 bg-white/20 text-white py-3 px-6 rounded-lg font-medium hover:bg-white/30 transition-colors"
+                            >
+                                Maybe Later
+                            </button>
+                        </div>
+
+                        <div className="text-center mt-8">
+                            <p className="text-white/60 text-sm">
+                                Enjoy your subscription. 
+                            </p>
+                            
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<SubscriptionApp />, document.getElementById('root'));
+    </script>
+
+          
+</body>
+</html>
